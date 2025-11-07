@@ -1,0 +1,74 @@
+═══════════════════════════════════════════════════════════════
+  AUTOMAÇÃO WHATSAPP - RESTAURANTE
+  Instruções de Instalação e Uso
+═══════════════════════════════════════════════════════════════
+
+📋 PRÉ-REQUISITOS:
+  • Node.js instalado (versão 14 ou superior)
+  • Navegador moderno (Chrome, Firefox, Edge)
+
+🚀 INSTALAÇÃO:
+
+1. Abra o PowerShell ou Prompt de Comando neste diretório
+
+2. Instale as dependências:
+   npm install
+
+   (Isso pode levar alguns minutos na primeira vez)
+
+▶️ COMO USAR:
+
+1. Inicie o servidor:
+   npm start
+
+2. Abra o arquivo zap.html no navegador:
+   • Clique duas vezes no arquivo zap.html
+   • OU acesse: http://localhost:3000
+
+3. Conecte ao WhatsApp:
+   • Clique em "Conectar WhatsApp"
+   • Escaneie o QR Code com seu WhatsApp
+     (WhatsApp > Menu > Aparelhos conectados > Conectar um aparelho)
+   • Aguarde a confirmação "✅ Conectado ao WhatsApp!"
+
+4. Configure sua mensagem:
+   • Digite a mensagem que será enviada para todos os clientes
+
+5. Adicione clientes:
+   • Digite o número no formato: 5511999999999
+     (55 = Brasil, 11 = DDD, 999999999 = número)
+   • Clique em "Adicionar Cliente" ou pressione Enter
+   • Repita para adicionar mais clientes
+
+6. Envie as mensagens:
+   • Clique em "Enviar Mensagens para Todos"
+   • As mensagens serão enviadas automaticamente
+   • Intervalo de 10 segundos entre cada envio (para evitar bloqueios)
+
+⚠️ IMPORTANTE:
+
+• As mensagens são enviadas com intervalo de 10 segundos
+• Isso ajuda a evitar bloqueios do WhatsApp
+• Use de forma responsável
+• Na primeira vez, você precisa escanear o QR Code
+• Nas próximas vezes, a conexão será automática
+
+📝 FORMATO DE NÚMERO:
+
+Brasil: 55 + DDD + número
+Exemplo: 5511999999999 (São Paulo)
+Exemplo: 5521987654321 (Rio de Janeiro)
+
+🔧 PROBLEMAS COMUNS:
+
+• Erro ao conectar:
+  → Certifique-se de que o servidor está rodando (npm start)
+
+• QR Code não aparece:
+  → Verifique se todas as dependências foram instaladas (npm install)
+
+• Mensagens não são enviadas:
+  → Verifique se o WhatsApp está conectado
+  → Verifique se os números estão no formato correto
+
+═══════════════════════════════════════════════════════════════

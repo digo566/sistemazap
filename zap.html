@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Automação WhatsApp - Restaurante</title>
+  <style>
+    body { font-family: Inter, Arial, sans-serif; background: #f4f7fb; margin:0; padding:20px; }
+    .wrap { max-width: 1000px; margin: 0 auto; }
+    .card { background:white; padding:18px; border-radius:10px; box-shadow:0 8px 30px rgba(2,6,23,0.08); margin-bottom:18px; }
+    h1 { color:#0f5132; }
+    label { display:block; font-weight:600; margin-top:12px; color:#333; }
+    input[type="text"], input[type="number"], textarea, select { width:100%; padding:10px; margin-top:6px; border-radius:8px; border:1px solid #e0e6ef; font-size:14px; }
+    textarea { min-height:90px; resize:vertical; }
+    .btn { display:inline-block; background:linear-gradient(90deg,#25D366,#128C7E); color:white; padding:10px 14px; border-radius:8px; font-weight:700; border:0; cursor:pointer; margin-top:10px; }
+    .btn.secondary { background:#1976d2; }
+    .row { display:flex; gap:12px; align-items:flex-start; margin-top:10px; }
+    .col { flex:1; }
+    .small { font-size:13px; color:#666; }
+    .options-list { margin-top:8px; }
+    .opt-row { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+    .opt-row input[type="text"] { flex:1; }
+    .danger { background:linear-gradient(90deg,#dc3545,#c82333); }
+    #flowPreview { height:200px; font-family:monospace; margin-top:10px; }
+    .progress { margin-top:8px; background:#eef5f0; padding:8px; border-radius:8px; font-weight:600; color:#333; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>🍽️ Automação WhatsApp — Restaurante</h1>
+      <div class="small">Conecte o WhatsApp (mesmo número) e gerencie automações + disparos em massa.</div>
+
+      <label>Conexão</label>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <button class="btn" id="connectBtn" onclick="connectWhatsApp()">Conectar WhatsApp</button>
+        <button class="btn secondary" id="disconnectBtn" onclick="disconnectWhatsApp()" style="display:none">Desconectar</button>
+      </div>
+      <div id="status" class="small" style="margin-top:8px;">Não conectado</div>
+      <div id="qrContainer" style="margin-top:10px;"></div>
+    </div>
+
+    <!-- Editor de etapa -->
+    <div class="card">
+      <h2>Etapa do Fluxo / Regras</h2>
+
+      <label>Pergunta / Frase (texto que o bot envia)</label>
+      <input type="text" id="autoQuestion" placeholder="Ex: Olá! Deseja ver o cardápio?" />
+
+      <label class="small">Mensagem padrão (defaultReply) — enviada quando resposta não bate com nenhuma opção</label>
+      <input type="text" id="defaultReply" placeholder="Ex: Não entendi sua resposta, por favor escolha uma opção" />
+
+      <label class="small">Upsell por tempo (opcional) — se cliente não responder em X minutos</label>
+      <div style="display:flex; gap:8px;">
+        <input type="number" id="upsellDelay" placeholder="Minutos (ex: 3)" min="1" style="width:140px" />
+        <input type="text" id="upsellMessage" placeholder="Mensagem de upsell por tempo (ex: Aproveite nosso combo!)" />
+      </div>
+
+      <hr style="margin-top:12px; border:none; border-top:1px solid #eef2f7" />
+
+      <label class="small">Regras de resposta (cada opção)</label>
+      <div id="optionsContainer" class="options-list"></div>
+      <div style="margin-top:8px;">
+        <button class="btn" onclick="addOptionRow()">+ Adicionar opção</button>
+      </div>
+
+      <div style="display:flex; gap:8px; margin-top:12px;">
+        <button class="btn" onclick="addStep()">Salvar Etapa</button>
+        <button class="btn danger" onclick="clearStepEditor()">Limpar Campos</button>
+      </div>
+    </div>
+
+    <!-- Lista + publicar -->
+    <div class="card">
+      <h2>Fluxo atual</h2>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <label style="width:160px">Etapa inicial</label>
+        <select id="startNodeSelect"></select>
+      </div>
+
+      <div style="margin-top:12px;">
+        <div id="flowList" style="max-height:200px; overflow:auto; border:1px dashed #e6eef7; padding:8px; border-radius:8px;"></div>
+      </div>
+
+      <div style="display:flex; gap:8px; margin-top:12px;">
+        <button class="btn" onclick="publishFlow()">🚀 Publicar Automação</button>
+        <button class="btn secondary" onclick="saveFlowBackup()">💾 Salvar backup local</button>
+        <button class="btn secondary" onclick="loadFlowBackup()">📥 Carregar backup</button>
+      </div>
+
+      <label style="margin-top:12px">Pré-visualização (JSON)</label>
+      <textarea id="flowPreview" readonly></textarea>
+    </div>
+
+    <!-- Disparo em massa -->
+    <div class="card">
+      <h2>📣 Disparo em massa (apenas para quem já conversou)</h2>
+      <label class="small">Mensagem da campanha</label>
+      <textarea id="broadcastMessage" placeholder="Mensagem para enviar a todos os contatos que já conversaram"></textarea>
+
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <button class="btn" id="broadcastBtn" onclick="startBroadcast()">Enviar campanha para todos os contatos ativos</button>
+        <div id="broadcastProgress" class="progress" style="display:none;"></div>
+      </div>
+      <div class="small" style="margin-top:8px">Será enviado 1 mensagem a cada 5 segundos para contatos com histórico de conversa.</div>
+    </div>
+  </div>
+
+<script>
+  let ws = null;
+  let flow = { version: '1.0.0', startNodeId: null, nodes: {} };
+  let nextNodeCounter = 1;
+  let isConnected = false;
+
+  // ===== helpers UI =====
+  function addOptionRow(preset = {}) {
+    const container = document.getElementById('optionsContainer');
+    const row = document.createElement('div');
+    row.className = 'opt-row';
+
+    row.innerHTML = `
+      <input type="text" class="optLabel" placeholder="Texto esperado (ex: 1, cardapio)" value="${preset.label || ''}" />
+      <input type="text" class="optReply" placeholder="Resposta automática (o que o bot enviará)" value="${preset.replyMessage || ''}" />
+      <input type="text" class="optFollowTrigger" placeholder="Palavra do cliente que dispara upsell (ex: nao quero)" value="${preset.followupTrigger || ''}" />
+      <input type="text" class="optFollowMsg" placeholder="Mensagem alternativa (upsell reativo)" value="${preset.followupMessage || ''}" />
+      <button onclick="this.parentElement.remove()" style="background:#f8f9fa;border:1px solid #eee;padding:6px;border-radius:6px;">❌</button>
+    `;
+    container.appendChild(row);
+  }
+
+  function clearStepEditor() {
+    document.getElementById('autoQuestion').value = '';
+    document.getElementById('defaultReply').value = '';
+    document.getElementById('upsellDelay').value = '';
+    document.getElementById('upsellMessage').value = '';
+    document.getElementById('optionsContainer').innerHTML = '';
+    addOptionRow();
+  }
+
+  function renderFlowList() {
+    const el = document.getElementById('flowList');
+    const ids = Object.keys(flow.nodes);
+    if (ids.length === 0) {
+      el.innerHTML = '<div class="small">Nenhuma etapa criada ainda</div>';
+      document.getElementById('startNodeSelect').innerHTML = '<option value="">(vazio)</option>';
+      document.getElementById('flowPreview').value = JSON.stringify(flow, null, 2);
+      return;
+    }
+
+    el.innerHTML = ids.map(id => {
+      const n = flow.nodes[id];
+      const optionsHtml = n.options.map(o => `<li><strong>${o.label}</strong> → reply: ${o.replyMessage || '—'} / trigger: ${o.followupTrigger || '—'} / followup: ${o.followupMessage || '—'}</li>`).join('');
+      return `<div style="padding:8px;border-bottom:1px solid #f1f5f9;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <div><strong>${id}</strong> — ${n.text}</div>
+          <div>
+            <button onclick="editNode('${id}')">Editar</button>
+            <button onclick="removeNode('${id}')">Remover</button>
+          </div>
+        </div>
+        <ul style="margin-top:8px;margin-left:18px">${optionsHtml}</ul>
+      </div>`;
+    }).join('');
+
+    // start node select
+    const sel = document.getElementById('startNodeSelect');
+    sel.innerHTML = ids.map(id => `<option value="${id}">${id}</option>`).join('');
+    if (flow.startNodeId) sel.value = flow.startNodeId;
+    document.getElementById('flowPreview').value = JSON.stringify(flow, null, 2);
+  }
+
+  function addStep() {
+    const text = document.getElementById('autoQuestion').value.trim();
+    const defaultReply = document.getElementById('defaultReply').value.trim();
+    const upsellDelay = document.getElementById('upsellDelay').value.trim();
+    const upsellMessage = document.getElementById('upsellMessage').value.trim();
+
+    const optsRows = Array.from(document.querySelectorAll('#optionsContainer .opt-row'));
+    if (!text) return alert('Digite a pergunta da etapa.');
+    if (optsRows.length === 0) return alert('Adicione ao menos uma opção.');
+
+    const nodeId = 'n' + nextNodeCounter++;
+    const options = optsRows.map(r => {
+      return {
+        label: r.querySelector('.optLabel').value.trim(),
+        replyMessage: r.querySelector('.optReply').value.trim() || null,
+        matchType: 'equals',
+        nextNodeId: null,
+        followupTrigger: r.querySelector('.optFollowTrigger').value.trim() || null,
+        followupMessage: r.querySelector('.optFollowMsg').value.trim() || null
+      };
+    });
+
+    flow.nodes[nodeId] = {
+      id: nodeId,
+      text,
+      defaultReply: defaultReply || null,
+      upsellDelay: upsellDelay ? Number(upsellDelay) : null,
+      upsellMessage: upsellMessage || null,
+      options
+    };
+
+    if (!flow.startNodeId) flow.startNodeId = nodeId;
+    clearStepEditor();
+    renderFlowList();
+  }
+
+  function editNode(nodeId) {
+    const node = flow.nodes[nodeId];
+    if (!node) return;
+    document.getElementById('autoQuestion').value = node.text || '';
+    document.getElementById('defaultReply').value = node.defaultReply || '';
+    document.getElementById('upsellDelay').value = node.upsellDelay || '';
+    document.getElementById('upsellMessage').value = node.upsellMessage || '';
+    const container = document.getElementById('optionsContainer');
+    container.innerHTML = '';
+    node.options.forEach(opt => addOptionRow(opt));
+    // remove node and let user save again (edit)
+    removeNode(nodeId);
+  }
+
+  function removeNode(nodeId) {
+    delete flow.nodes[nodeId];
+    if (flow.startNodeId === nodeId) {
+      const keys = Object.keys(flow.nodes);
+      flow.startNodeId = keys.length ? keys[0] : null;
+    }
+    renderFlowList();
+  }
+
+  function publishFlow() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return alert('Conecte-se primeiro ao WhatsApp.');
+    // atualizar startNode
+    const sel = document.getElementById('startNodeSelect');
+    if (sel && sel.value) flow.startNodeId = sel.value;
+    ws.send(JSON.stringify({ action: 'publishFlow', flow }));
+  }
+
+  function saveFlowBackup() {
+    try {
+      localStorage.setItem('automationFlow', JSON.stringify(flow));
+      alert('Backup salvo localmente.');
+    } catch (e) {
+      alert('Falha ao salvar backup: ' + e.message);
+    }
+  }
+  function loadFlowBackup() {
+    try {
+      const raw = localStorage.getItem('automationFlow');
+      if (!raw) return alert('Nenhum backup encontrado.');
+      flow = JSON.parse(raw);
+      // recalc counter
+      const ids = Object.keys(flow.nodes || {});
+      const max = ids.reduce((m, id) => Math.max(m, parseInt(id.replace('n',''))||0), 0);
+      nextNodeCounter = Math.max(nextNodeCounter, max + 1);
+      renderFlowList();
+      alert('Backup carregado.');
+    } catch (e) { alert('Erro ao carregar backup: ' + e.message); }
+  }
+
+  // ===== websocket / conexão =====
+  function connectWhatsApp() {
+    const qrDiv = document.getElementById('qrContainer');
+    const status = document.getElementById('status');
+    if (ws && ws.readyState === WebSocket.OPEN) return alert('Já conectado');
+
+    const origin = window.location.origin;
+    // tenta ws://localhost:3000 por padrão
+    const url = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') ? 'ws://localhost:3000' : (origin.startsWith('https') ? origin.replace('https','wss') : origin.replace('http','ws'));
+    ws = new WebSocket(url);
+
+    ws.onopen = () => {
+      status.textContent = 'Conectando...';
+      ws.send(JSON.stringify({ action: 'connect' }));
+    };
+
+    ws.onmessage = (evt) => {
+      const data = JSON.parse(evt.data);
+      if (data.type === 'qr') {
+        document.getElementById('qrContainer').innerHTML = `<img src="${data.qr}" style="max-width:260px" />`;
+        status.textContent = 'Escaneie o QR code';
+      } else if (data.type === 'ready') {
+        status.textContent = '✅ WhatsApp conectado';
+        document.getElementById('qrContainer').innerHTML = '';
+        document.getElementById('disconnectBtn').style.display = 'inline-block';
+      } else if (data.type === 'contacts') {
+        // opcional: exibe contagens
+        status.textContent = `✅ Conectado — ${data.contacts.length} contatos encontrados`;
+      } else if (data.type === 'flowPublished') {
+        alert('Automação publicada com sucesso!');
+      } else if (data.type === 'flowError') {
+        alert('Erro ao publicar: ' + data.message);
+      } else if (data.type === 'error') {
+        alert('Erro: ' + data.message);
+      } else if (data.type === 'broadcastStatus') {
+        handleBroadcastStatus(data);
+      }
+    };
+
+    ws.onerror = () => { status.textContent = 'Erro na conexão'; };
+    ws.onclose = () => { status.textContent = 'Conexão encerrada'; document.getElementById('disconnectBtn').style.display = 'none'; };
+  }
+
+  function disconnectWhatsApp() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.close();
+    ws = null;
+    document.getElementById('status').textContent = 'Desconectado';
+    document.getElementById('disconnectBtn').style.display = 'none';
+  }
+
+  // ===== broadcast =====
+  function startBroadcast() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return alert('Conecte-se primeiro ao WhatsApp.');
+    const message = document.getElementById('broadcastMessage').value.trim();
+    if (!message) return alert('Digite a mensagem para enviar.');
+    // iniciar broadcast via WS
+    document.getElementById('broadcastBtn').disabled = true;
+    document.getElementById('broadcastProgress').style.display = 'block';
+    document.getElementById('broadcastProgress').textContent = 'Iniciando...';
+    ws.send(JSON.stringify({ action: 'sendMessages', message: message, delaySeconds: 5 }));
+  }
+
+  function handleBroadcastStatus(data) {
+    const el = document.getElementById('broadcastProgress');
+    if (!el) return;
+    if (data.status === 'start') {
+      el.textContent = `Iniciando envio para ${data.total} contatos...`;
+    } else if (data.status === 'sending') {
+      el.textContent = `Enviando... ${data.sent}/${data.total} (to: ${data.to})`;
+    } else if (data.status === 'completed') {
+      el.textContent = `✅ Enviadas ${data.sent}/${data.total}. Concluído.`;
+      document.getElementById('broadcastBtn').disabled = false;
+      setTimeout(()=>el.style.display='none', 4000);
+    } else if (data.status === 'empty') {
+      el.textContent = data.message;
+      document.getElementById('broadcastBtn').disabled = false;
+      setTimeout(()=>el.style.display='none', 4000);
+    } else if (data.status === 'error') {
+      el.textContent = 'Erro no envio: ' + (data.message || '');
+      document.getElementById('broadcastBtn').disabled = false;
+    }
+  }
+
+  // inicial
+  (function init(){
+    addOptionRow();
+    renderFlowList();
+  })();
+</script>
+</body>
+</html>
+
+
