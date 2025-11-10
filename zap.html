@@ -40,6 +40,7 @@
       <div id="qrContainer" style="margin-top:10px"></div>  <!-- Aqui o QR Code será exibido -->
     </div>
 
+    <!-- Etapa do Fluxo -->
     <div class="card">
       <h2>Etapa do Fluxo / Regras</h2>
       <label>Pergunta / Frase (o que o bot envia)</label>
@@ -68,6 +69,7 @@
       </div>
     </div>
 
+    <!-- Publicação do Fluxo -->
     <div class="card">
       <h2>Fluxo atual</h2>
       <div style="display:flex;gap:8px;align-items:center">
@@ -80,7 +82,7 @@
       </div>
 
       <div style="display:flex;gap:8px;margin-top:12px">
-        <button class="btn" onclick="publishFlow()">🚀 Publicar Automação (salva no servidor)</button>
+        <button class="btn" id="publishBtn" onclick="publishFlow()">🚀 Publicar Automação</button>
         <button class="btn secondary" onclick="saveFlowLocal()">⬇️ Baixar fluxo (.json)</button>
         <label class="btn secondary" style="cursor:pointer">
           📁 Importar fluxo (.json)
@@ -95,6 +97,7 @@
       <textarea id="flowPreview" readonly></textarea>
     </div>
 
+    <!-- Envio de Disparo -->
     <div class="card">
       <h2>📣 Disparo em massa (apenas para quem já conversou)</h2>
       <label class="small">Mensagem da campanha</label>
@@ -113,6 +116,7 @@
   let flow = { version: '1.0.0', startNodeId: null, nodes: {} };
   let nextNodeCounter = 1;
 
+  // Função para adicionar opções
   function addOptionRow(preset = {}) {
     const c = document.getElementById('optionsContainer');
     const row = document.createElement('div');
@@ -129,6 +133,7 @@
     c.appendChild(row);
   }
 
+  // Limpar campos de edição
   function clearStepEditor() {
     document.getElementById('autoQuestion').value = '';
     document.getElementById('defaultReply').value = '';
@@ -138,6 +143,7 @@
     addOptionRow();
   }
 
+  // Renderizar o fluxo
   function renderFlowList() {
     const el = document.getElementById('flowList');
     const ids = Object.keys(flow.nodes);
@@ -169,6 +175,7 @@
     document.getElementById('flowPreview').value = JSON.stringify(flow, null, 2);
   }
 
+  // Adicionar etapa
   function addStep() {
     const text = document.getElementById('autoQuestion').value.trim();
     const defaultReply = document.getElementById('defaultReply').value.trim();
@@ -200,29 +207,26 @@
     renderFlowList();
   }
 
-  // Função para importar fluxo
-  function importFlowFromFile(e) {
-    const file = e.target.files && e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const parsed = JSON.parse(reader.result);
-        flow = parsed;
-        const ids = Object.keys(flow.nodes || {});
-        const max = ids.reduce((m, id) => Math.max(m, parseInt(id.replace('n','')) || 0), 0);
-        nextNodeCounter = Math.max(nextNodeCounter, max + 1);
-        renderFlowList();
-        alert('Fluxo importado com sucesso');
-      } catch (err) {
-        alert('JSON inválido: ' + err.message);
-      }
-    };
-    reader.readAsText(file);
-    e.target.value = ''; // Reset file input
+  // Função para publicar o fluxo
+  function publishFlow() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return alert('Conecte-se ao WhatsApp antes de publicar');
+    const sel = document.getElementById('startNodeSelect');
+    if (sel && sel.value) flow.startNodeId = sel.value;
+    ws.send(JSON.stringify({ action: 'publishFlow', flow }));
   }
 
-  // WebSocket connection
+  // Enviar disparo em massa
+  function startBroadcast() {
+    const msg = document.getElementById('broadcastMessage').value.trim();
+    if (!msg) return alert('Digite a mensagem');
+    if (!ws || ws.readyState !== WebSocket.OPEN) return alert('Conecte-se ao WhatsApp primeiro');
+    document.getElementById('broadcastBtn').disabled = true;
+    document.getElementById('broadcastProgress').style.display = 'block';
+    document.getElementById('broadcastProgress').textContent = 'Iniciando...';
+    ws.send(JSON.stringify({ action: 'sendMessages', message: msg, delaySeconds: 5 }));
+  }
+
+  // Conexão WebSocket
   function connectWhatsApp() {
     if (ws && ws.readyState === WebSocket.OPEN) return alert('Já conectado');
     const origin = window.location.origin;
@@ -236,7 +240,6 @@
 
     ws.onmessage = evt => {
       const d = JSON.parse(evt.data);
-
       if (d.type === 'qr') {
         document.getElementById('qrContainer').innerHTML = `<img src="${d.qr}" style="max-width:260px" />`;
         document.getElementById('status').textContent = 'Escaneie o QR code';
