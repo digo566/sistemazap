@@ -147,6 +147,7 @@
       document.getElementById('flowPreview').value = JSON.stringify(flow, null, 2);
       return;
     }
+
     el.innerHTML = ids.map(id => {
       const n = flow.nodes[id];
       const optionsHtml = n.options.map(o => `<li><strong>${o.label}</strong> → reply: ${o.replyMessage || '—'} / trigger: ${o.followupTrigger || '—'} / followup: ${o.followupMessage || '—'} / next: ${o.nextNodeId || '—'}</li>`).join('');
@@ -161,6 +162,7 @@
         <ul style="margin-top:8px;margin-left:18px">${optionsHtml}</ul>
       </div>`;
     }).join('');
+
     const sel = document.getElementById('startNodeSelect');
     sel.innerHTML = ids.map(id => `<option value="${id}">${id}</option>`).join('');
     if (flow.startNodeId) sel.value = flow.startNodeId;
@@ -198,56 +200,29 @@
     renderFlowList();
   }
 
-  function editNode(nodeId) {
-    const node = flow.nodes[nodeId];
-    if (!node) return;
-    document.getElementById('autoQuestion').value = node.text || '';
-    document.getElementById('defaultReply').value = node.defaultReply || '';
-    document.getElementById('upsellDelay').value = node.upsellDelay || '';
-    document.getElementById('upsellMessage').value = node.upsellMessage || '';
-    document.getElementById('optionsContainer').innerHTML = '';
-    node.options.forEach(o => addOptionRow(o));
-    removeNode(nodeId); // remove original, user will save to replace
+  // Função para importar fluxo
+  function importFlowFromFile(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(reader.result);
+        flow = parsed;
+        const ids = Object.keys(flow.nodes || {});
+        const max = ids.reduce((m, id) => Math.max(m, parseInt(id.replace('n','')) || 0), 0);
+        nextNodeCounter = Math.max(nextNodeCounter, max + 1);
+        renderFlowList();
+        alert('Fluxo importado com sucesso');
+      } catch (err) {
+        alert('JSON inválido: ' + err.message);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = ''; // Reset file input
   }
 
-  function removeNode(nodeId) {
-    delete flow.nodes[nodeId];
-    if (flow.startNodeId === nodeId) {
-      const keys = Object.keys(flow.nodes);
-      flow.startNodeId = keys.length ? keys[0] : null;
-    }
-    renderFlowList();
-  }
-
-  function publishFlow() {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return alert('Conecte-se ao WhatsApp antes de publicar');
-    const sel = document.getElementById('startNodeSelect');
-    if (sel && sel.value) flow.startNodeId = sel.value;
-    ws.send(JSON.stringify({ action: 'publishFlow', flow }));
-  }
-
-  // save local (manual download)
-  function saveFlowLocal() {
-    const name = prompt('Nome do arquivo (deixe vazio para nome automático):');
-    let filename = name ? name.trim() : null;
-    if (!filename) {
-      const d = new Date().toISOString().replace(/:/g, '-');
-      filename = `flow-${d}.json`;
-    } else if (!filename.endsWith('.json')) {
-      filename = filename + '.json';
-    }
-    const blob = new Blob([JSON.stringify(flow, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  }
-
-  // websocket connect
+  // WebSocket connection
   function connectWhatsApp() {
     if (ws && ws.readyState === WebSocket.OPEN) return alert('Já conectado');
     const origin = window.location.origin;
