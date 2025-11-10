@@ -40,14 +40,214 @@
       <div id="qrContainer" style="margin-top:10px"></div>  <!-- Aqui o QR Code será exibido -->
     </div>
 
-    <!-- Outras seções do formulário seguem aqui... -->
+    <div class="card">
+      <h2>Etapa do Fluxo / Regras</h2>
+      <label>Pergunta / Frase (o que o bot envia)</label>
+      <input type="text" id="autoQuestion" placeholder="Ex: Olá! Deseja ver o cardápio?" />
 
+      <label class="small">Mensagem padrão (defaultReply)</label>
+      <input type="text" id="defaultReply" placeholder="Ex: Não entendi sua resposta, por favor escolha uma opção" />
+
+      <label class="small">Upsell por tempo (opcional)</label>
+      <div style="display:flex;gap:8px">
+        <input type="number" id="upsellDelay" placeholder="Minutos" min="1" style="width:140px" />
+        <input type="text" id="upsellMessage" placeholder="Mensagem de upsell por tempo (ex: Aproveite nosso combo!)" />
+      </div>
+
+      <hr style="margin-top:12px;border:none;border-top:1px solid #eef2f7" />
+
+      <label class="small">Regras de resposta (cada opção)</label>
+      <div id="optionsContainer" class="options-list"></div>
+      <div style="margin-top:8px">
+        <button class="btn" onclick="addOptionRow()">+ Adicionar opção</button>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="btn" onclick="addStep()">Salvar Etapa</button>
+        <button class="btn danger" onclick="clearStepEditor()">Limpar Campos</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Fluxo atual</h2>
+      <div style="display:flex;gap:8px;align-items:center">
+        <label style="width:160px">Etapa inicial</label>
+        <select id="startNodeSelect"></select>
+      </div>
+
+      <div style="margin-top:12px">
+        <div id="flowList" style="max-height:200px;overflow:auto;border:1px dashed #e6eef7;padding:8px;border-radius:8px"></div>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="btn" onclick="publishFlow()">🚀 Publicar Automação (salva no servidor)</button>
+        <button class="btn secondary" onclick="saveFlowLocal()">⬇️ Baixar fluxo (.json)</button>
+        <label class="btn secondary" style="cursor:pointer">
+          📁 Importar fluxo (.json)
+          <input id="importInput" type="file" accept="application/json" style="display:none" onchange="importFlowFromFile(event)" />
+        </label>
+        <button class="btn secondary" onclick="listServerFlows()">📂 Listar fluxos salvos no servidor</button>
+      </div>
+
+      <div id="savedFlowsList" style="margin-top:8px"></div>
+
+      <label style="margin-top:12px">Pré-visualização (JSON)</label>
+      <textarea id="flowPreview" readonly></textarea>
+    </div>
+
+    <div class="card">
+      <h2>📣 Disparo em massa (apenas para quem já conversou)</h2>
+      <label class="small">Mensagem da campanha</label>
+      <textarea id="broadcastMessage" placeholder="Mensagem para enviar a todos os contatos que já conversaram"></textarea>
+
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn" id="broadcastBtn" onclick="startBroadcast()">Enviar campanha para todos os contatos ativos</button>
+        <div id="broadcastProgress" class="progress" style="display:none"></div>
+      </div>
+      <div class="small" style="margin-top:8px">Será enviado 1 mensagem a cada 5 segundos para contatos com histórico.</div>
+    </div>
   </div>
 
 <script>
   let ws = null;
+  let flow = { version: '1.0.0', startNodeId: null, nodes: {} };
+  let nextNodeCounter = 1;
 
-  // Função de conexão com o WebSocket
+  function addOptionRow(preset = {}) {
+    const c = document.getElementById('optionsContainer');
+    const row = document.createElement('div');
+    row.className = 'opt-row';
+    row.style.marginBottom = '8px';
+    row.innerHTML = `
+      <input type="text" class="optLabel" placeholder="Texto esperado (ex: 1, cardapio)" value="${preset.label || ''}" />
+      <input type="text" class="optReply" placeholder="Resposta automática (o que o bot envia)" value="${preset.replyMessage || ''}" />
+      <input type="text" class="optFollowTrigger" placeholder="Palavra do cliente para upsell reativo (ex: nao quero)" value="${preset.followupTrigger || ''}" />
+      <input type="text" class="optFollowMsg" placeholder="Mensagem alternativa (upsell reativo)" value="${preset.followupMessage || ''}" />
+      <input type="text" class="optNext" placeholder="Próxima etapa (ex: n2) (opcional)" value="${preset.nextNodeId || ''}" style="width:120px" />
+      <button onclick="this.parentElement.remove()" style="background:#f8f9fa;border:1px solid #eee;padding:6px;border-radius:6px">❌</button>
+    `;
+    c.appendChild(row);
+  }
+
+  function clearStepEditor() {
+    document.getElementById('autoQuestion').value = '';
+    document.getElementById('defaultReply').value = '';
+    document.getElementById('upsellDelay').value = '';
+    document.getElementById('upsellMessage').value = '';
+    document.getElementById('optionsContainer').innerHTML = '';
+    addOptionRow();
+  }
+
+  function renderFlowList() {
+    const el = document.getElementById('flowList');
+    const ids = Object.keys(flow.nodes);
+    if (ids.length === 0) {
+      el.innerHTML = '<div class="small">Nenhuma etapa criada</div>';
+      document.getElementById('startNodeSelect').innerHTML = '<option value="">(vazio)</option>';
+      document.getElementById('flowPreview').value = JSON.stringify(flow, null, 2);
+      return;
+    }
+    el.innerHTML = ids.map(id => {
+      const n = flow.nodes[id];
+      const optionsHtml = n.options.map(o => `<li><strong>${o.label}</strong> → reply: ${o.replyMessage || '—'} / trigger: ${o.followupTrigger || '—'} / followup: ${o.followupMessage || '—'} / next: ${o.nextNodeId || '—'}</li>`).join('');
+      return `<div style="padding:8px;border-bottom:1px solid #f1f5f9">
+        <div style="display:flex;justify-content:space-between">
+          <div><strong>${id}</strong> — ${n.text}</div>
+          <div>
+            <button onclick="editNode('${id}')">Editar</button>
+            <button onclick="removeNode('${id}')">Remover</button>
+          </div>
+        </div>
+        <ul style="margin-top:8px;margin-left:18px">${optionsHtml}</ul>
+      </div>`;
+    }).join('');
+    const sel = document.getElementById('startNodeSelect');
+    sel.innerHTML = ids.map(id => `<option value="${id}">${id}</option>`).join('');
+    if (flow.startNodeId) sel.value = flow.startNodeId;
+    document.getElementById('flowPreview').value = JSON.stringify(flow, null, 2);
+  }
+
+  function addStep() {
+    const text = document.getElementById('autoQuestion').value.trim();
+    const defaultReply = document.getElementById('defaultReply').value.trim();
+    const upsellDelay = document.getElementById('upsellDelay').value.trim();
+    const upsellMessage = document.getElementById('upsellMessage').value.trim();
+    const rows = Array.from(document.querySelectorAll('#optionsContainer .opt-row'));
+    if (!text) return alert('Digite a pergunta da etapa');
+    if (rows.length === 0) return alert('Adicione pelo menos uma opção');
+
+    const id = 'n' + nextNodeCounter++;
+    const options = rows.map(r => ({
+      label: r.querySelector('.optLabel').value.trim(),
+      replyMessage: r.querySelector('.optReply').value.trim() || null,
+      matchType: 'equals',
+      nextNodeId: r.querySelector('.optNext').value.trim() || null,
+      followupTrigger: r.querySelector('.optFollowTrigger').value.trim() || null,
+      followupMessage: r.querySelector('.optFollowMsg').value.trim() || null
+    }));
+
+    flow.nodes[id] = {
+      id, text,
+      defaultReply: defaultReply || null,
+      upsellDelay: upsellDelay ? Number(upsellDelay) : null,
+      upsellMessage: upsellMessage || null,
+      options
+    };
+    if (!flow.startNodeId) flow.startNodeId = id;
+    clearStepEditor();
+    renderFlowList();
+  }
+
+  function editNode(nodeId) {
+    const node = flow.nodes[nodeId];
+    if (!node) return;
+    document.getElementById('autoQuestion').value = node.text || '';
+    document.getElementById('defaultReply').value = node.defaultReply || '';
+    document.getElementById('upsellDelay').value = node.upsellDelay || '';
+    document.getElementById('upsellMessage').value = node.upsellMessage || '';
+    document.getElementById('optionsContainer').innerHTML = '';
+    node.options.forEach(o => addOptionRow(o));
+    removeNode(nodeId); // remove original, user will save to replace
+  }
+
+  function removeNode(nodeId) {
+    delete flow.nodes[nodeId];
+    if (flow.startNodeId === nodeId) {
+      const keys = Object.keys(flow.nodes);
+      flow.startNodeId = keys.length ? keys[0] : null;
+    }
+    renderFlowList();
+  }
+
+  function publishFlow() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return alert('Conecte-se ao WhatsApp antes de publicar');
+    const sel = document.getElementById('startNodeSelect');
+    if (sel && sel.value) flow.startNodeId = sel.value;
+    ws.send(JSON.stringify({ action: 'publishFlow', flow }));
+  }
+
+  // save local (manual download)
+  function saveFlowLocal() {
+    const name = prompt('Nome do arquivo (deixe vazio para nome automático):');
+    let filename = name ? name.trim() : null;
+    if (!filename) {
+      const d = new Date().toISOString().replace(/:/g, '-');
+      filename = `flow-${d}.json`;
+    } else if (!filename.endsWith('.json')) {
+      filename = filename + '.json';
+    }
+    const blob = new Blob([JSON.stringify(flow, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  // websocket connect
   function connectWhatsApp() {
     if (ws && ws.readyState === WebSocket.OPEN) return alert('Já conectado');
     const origin = window.location.origin;
@@ -61,13 +261,13 @@
 
     ws.onmessage = evt => {
       const d = JSON.parse(evt.data);
+
       if (d.type === 'qr') {
-        // Exibindo o QR Code recebido do servidor
         document.getElementById('qrContainer').innerHTML = `<img src="${d.qr}" style="max-width:260px" />`;
         document.getElementById('status').textContent = 'Escaneie o QR code';
       } else if (d.type === 'ready') {
         document.getElementById('status').textContent = '✅ WhatsApp conectado';
-        document.getElementById('qrContainer').innerHTML = '';  // Limpa o QR Code quando o WhatsApp está pronto
+        document.getElementById('qrContainer').innerHTML = '';
         document.getElementById('disconnectBtn').style.display = 'inline-block';
       }
     };
@@ -79,7 +279,6 @@
     };
   }
 
-  // Função de desconexão do WebSocket
   function disconnectWhatsApp() {
     if (ws && ws.readyState === WebSocket.OPEN) ws.close();
     ws = null;
